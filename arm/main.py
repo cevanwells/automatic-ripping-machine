@@ -110,7 +110,7 @@ def main(logfile, disc):
 
         if (utils.make_dir(hboutpath)) is False:
             ts = round(time.time() * 100)
-            hboutpath = os.path.join(cfg['ARMPATH'], str(disc.videotitle) + "_" + str(ts))
+            hboutpath = os.path.join(cfg['ARMPATH'], str(disc.videotitle) + " - " + socket.gethostname() + "_" + str(ts))
             if(utils.make_dir(hboutpath)) is False:
                 logging.info("Failed to create base directory.  Exiting ARM.")
                 sys.exit()
