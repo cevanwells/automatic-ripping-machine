@@ -6,6 +6,7 @@ import logging
 import subprocess
 import time
 import shlex
+import socket
 
 from config import cfg
 
@@ -41,7 +42,7 @@ def makemkv(logfile, disc):
         return
 
     # get filesystem in order
-    rawpath = os.path.join(cfg['RAWPATH'], disc.videotitle)
+    rawpath = os.path.join(cfg['RAWPATH'], disc.videotitle + "-" + socket.gethostname())
     logging.info("Destination is " + rawpath)
 
     if not os.path.exists(rawpath):
