@@ -16,6 +16,8 @@ def notify(title, body):
     # Send notificaions
     # title = title for notification
     # body = body of the notification
+    
+    title = "{} ({})".format(title, socket.gethostname())
 
     if cfg['PB_KEY'] != "":
         try:
@@ -37,7 +39,7 @@ def notify(title, body):
         try:
             from pushover import init, Client
             init(cfg['PO_APP_KEY'])
-            Client(cfg['PO_USER_KEY']).send_message(body, title=title + " - " + socket.gethostname())
+            Client(cfg['PO_USER_KEY']).send_message(body, title=title)
         except:  # noqa: E722
             logging.error("Failed sending PushOver notification.  Continueing processing...")
 
