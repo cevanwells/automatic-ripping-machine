@@ -7,6 +7,7 @@ import fcntl
 import subprocess
 import shutil
 import requests
+import socket
 
 from config import cfg
 
@@ -36,7 +37,7 @@ def notify(title, body):
         try:
             from pushover import init, Client
             init(cfg['PO_APP_KEY'])
-            Client(cfg['PO_USER_KEY']).send_message(body, title=title)
+            Client(cfg['PO_USER_KEY']).send_message(body, title=title + " - " + socket.gethostname())
         except:  # noqa: E722
             logging.error("Failed sending PushOver notification.  Continueing processing...")
 
