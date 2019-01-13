@@ -13,6 +13,7 @@ import utils
 import makemkv
 import handbrake
 import identify
+import socket
 
 from config import cfg
 from classes import Disc
@@ -105,7 +106,7 @@ def main(logfile, disc):
 
     if disc.disctype in ["dvd", "bluray"]:
         # get filesystem in order
-        hboutpath = os.path.join(cfg['ARMPATH'], str(disc.videotitle))
+        hboutpath = os.path.join(cfg['ARMPATH'], str(disc.videotitle) + "-" + socket.gethostname())
 
         if (utils.make_dir(hboutpath)) is False:
             ts = round(time.time() * 100)
