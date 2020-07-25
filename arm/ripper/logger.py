@@ -3,7 +3,6 @@
 import os
 import logging
 import time
-# import yaml
 
 from arm.config.config import cfg
 
@@ -23,17 +22,17 @@ def setuplogging(job):
     else:
         logfile = job.label + ".log"
 
-    if cfg["LOGPATH"][-1:] == "/":
-        logfull = cfg["LOGPATH"] + logfile
+    if cfg['LOGPATH'][-1:] == "/":
+        logfull = cfg['LOGPATH'] + logfile
     else:
-        logfull = cfg["LOGPATH"] + "/" + logfile
+        logfull = cfg['LOGPATH'] + "/" + logfile
 
-    if cfg["LOGLEVEL"] == "DEBUG":
+    if cfg['LOGLEVEL'] == "DEBUG":
         logging.basicConfig(filename=logfull, format='[%(asctime)s] %(levelname)s ARM: %(module)s.%(funcName)s %(message)s',
-                            datefmt='%Y-%m-%d %H:%M:%S', level=cfg["LOGLEVEL"])
+                            datefmt='%Y-%m-%d %H:%M:%S', level=cfg['LOGLEVEL'])
     else:
         logging.basicConfig(filename=logfull, format='[%(asctime)s] %(levelname)s ARM: %(message)s',
-                            datefmt='%Y-%m-%d %H:%M:%S', level=cfg["LOGLEVEL"])
+                            datefmt='%Y-%m-%d %H:%M:%S', level=cfg['LOGLEVEL'])
 
     job.logfile = logfile
 

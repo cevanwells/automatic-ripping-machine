@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+# Handbrake processing of dvd/bluray
 
 import sys
 import os
@@ -6,10 +6,13 @@ import logging
 import subprocess
 import re
 import shlex
-# import ripper.utils
 
 from arm.ripper import utils
-from arm.config.config import cfg
+# from arm.config.config import cfg
+from arm.models.models import Track  # noqa: E402
+from arm.ui import app, db # noqa E402
+
+# flake8: noqa: W605
 
 
 def handbrake_mainfeature(srcpath, basepath, logfile, job):
@@ -22,21 +25,29 @@ def handbrake_mainfeature(srcpath, basepath, logfile, job):
     Returns nothing
     """
     logging.info("Starting DVD Movie Mainfeature processing")
+    logging.debug("Handbrake starting: " + str(job))
 
-    filename = os.path.join(basepath, job.title + ".mkv")
+    filename = os.path.join(basepath, job.title + "." + job.config.DEST_EXT)
     filepathname = os.path.join(basepath, filename)
+
+    get_track_info(srcpath, job)
+
+    track = job.tracks.filter_by(main_feature=True).first()
 
     logging.info("Ripping title Mainfeature to " + shlex.quote(filepathname))
 
+    track.filename = track.orig_filename = filename
+    db.session.commit()
+
     if job.disctype == "dvd":
-        hb_args = cfg['HB_ARGS_DVD']
-        hb_preset = cfg['HB_PRESET_DVD']
+        hb_args = job.config.HB_ARGS_DVD
+        hb_preset = job.config.HB_PRESET_DVD
     elif job.disctype == "bluray":
-        hb_args = cfg['HB_ARGS_BD']
-        hb_preset = cfg['HB_PRESET_BD']
+        hb_args = job.config.HB_ARGS_BD
+        hb_preset = job.config.HB_PRESET_BD
 
     cmd = 'nice {0} -i {1} -o {2} --main-feature --preset "{3}" {4} >> {5} 2>&1'.format(
-        cfg['HANDBRAKE_CLI'],
+        job.config.HANDBRAKE_CLI,
         shlex.quote(srcpath),
         shlex.quote(filepathname),
         hb_preset,
@@ -52,20 +63,21 @@ def handbrake_mainfeature(srcpath, basepath, logfile, job):
             shell=True
         ).decode("utf-8")
         logging.info("Handbrake call successful")
+        track.status = "success"
     except subprocess.CalledProcessError as hb_error:
         err = "Call to handbrake failed with code: " + str(hb_error.returncode) + "(" + str(hb_error.output) + ")"
         logging.error(err)
+        track.status = "fail"
+        track.error = err
         sys.exit(err)
 
     logging.info("Handbrake processing complete")
     logging.debug(str(job))
-    utils.move_files(basepath, filename, job, True)
-    utils.scan_emby()
 
-    try:
-        os.rmdir(basepath)
-    except OSError:
-        pass
+    track.ripped = True
+    db.session.commit()
+
+    return
 
 
 def handbrake_all(srcpath, basepath, logfile, job):
@@ -79,92 +91,45 @@ def handbrake_all(srcpath, basepath, logfile, job):
     """
     logging.info("Starting BluRay/DVD transcoding - All titles")
 
-    # get number of titles
-    logging.info("Getting total number of titles on disc.  This will take a minute or two...")
-    cmd = '{0} -i {1} -t 0 --scan'.format(
-        cfg['HANDBRAKE_CLI'],
-        shlex.quote(srcpath)
-        )
-
-    logging.debug("Sending command: %s", (cmd))
-
-    try:
-        hb = subprocess.run(
-            cmd,
-            stderr=subprocess.PIPE,
-            shell=True
-        )
-    except subprocess.CalledProcessError as hb_error:
-        err = "Call to handbrake failed with code: " + str(hb_error.returncode) + "(" + str(hb_error.output) + ")"
-        logging.error(err)
-        sys.exit(err)
-
-    titles = 0
-    mt_track = 0
-    prevline = ""
-    for line in hb.stderr.decode(errors='ignore').splitlines(True):
-        # get number of titles on disc
-        # pattern = re.compile(r'\bscan\:.*\btitle\(s\)')
-
-        if job.disctype == "bluray":
-            result = re.search('scan: BD has (.*) title\(s\)', line)
-        else:
-            result = re.search('scan: DVD has (.*) title\(s\)', line)
-
-        if result:
-            titles = result.group(1)
-            titles = titles.strip()
-            logging.debug("Line found is: " + line)
-            logging.info("Found " + titles + " titles")
-
-        # get main feature title number
-        if(re.search("Main Feature", line)) is not None:
-            t = prevline.split()
-            mt_track = re.sub('[:]', '', (t[2]))
-            logging.debug("Lines found are: 1) " + line.rstrip() + " | 2)" + prevline)
-            logging.info("Main Feature is title #" + mt_track)
-        prevline = line
-
-    if titles == 0:
-        raise ValueError("Couldn't get total number of tracks", "handbrake_all")
-
-    mt_track = str(mt_track).strip()
-
     if job.disctype == "dvd":
-        hb_args = cfg['HB_ARGS_DVD']
-        hb_preset = cfg['HB_PRESET_DVD']
+        hb_args = job.config.HB_ARGS_DVD
+        hb_preset = job.config.HB_PRESET_DVD
     elif job.disctype == "bluray":
-        hb_args = cfg['HB_ARGS_BD']
-        hb_preset = cfg['HB_PRESET_BD']
+        hb_args = job.config.HB_ARGS_BD
+        hb_preset = job.config.HB_PRESET_BD
 
-    for title in range(1, int(titles) + 1):
+    get_track_info(srcpath, job)
 
-        # get length
-        tlength = get_title_length(title, srcpath)
+    logging.debug("Total number of tracks is " + str(job.no_of_titles))
 
-        if tlength < int(cfg['MINLENGTH']):
+    for track in job.tracks:
+
+        if track.length < int(job.config.MINLENGTH):
             # too short
-            logging.info("Track #" + str(title) + " of " + str(titles) + ". Length (" + str(tlength) +
-                         ") is less than minimum length (" + cfg['MINLENGTH'] + ").  Skipping")
-        elif tlength > int(cfg['MAXLENGTH']):
+            logging.info("Track #" + str(track.track_number) + " of " + str(job.no_of_titles) + ". Length (" + str(track.length) +
+                         ") is less than minimum length (" + job.config.MINLENGTH + ").  Skipping")
+        elif track.length > int(job.config.MAXLENGTH):
             # too long
-            logging.info("Track #" + str(title) + " of " + str(titles) + ". Length (" + str(tlength) +
-                         ") is greater than maximum length (" + cfg['MAXLENGTH'] + ").  Skipping")
+            logging.info("Track #" + str(track.track_number) + " of " + str(job.no_of_titles) + ". Length (" + str(track.length) +
+                         ") is greater than maximum length (" + job.config.MAXLENGTH + ").  Skipping")
         else:
             # just right
-            logging.info("Processing track #" + str(title) + " of " + str(titles) + ". Length is " + str(tlength) + " seconds.")
+            logging.info("Processing track #" + str(track.track_number) + " of " + str(job.no_of_titles) + ". Length is " + str(track.length) + " seconds.")
 
-            filename = "title_" + str.zfill(str(title), 2) + "." + cfg['DEST_EXT']
+            filename = "title_" + str.zfill(str(track.track_number), 2) + "." + job.config.DEST_EXT
             filepathname = os.path.join(basepath, filename)
 
-            logging.info("Transcoding title " + str(title) + " to " + shlex.quote(filepathname))
+            logging.info("Transcoding title " + str(track.track_number) + " to " + shlex.quote(filepathname))
+
+            track.filename = track.orig_filename = filename
+            db.session.commit()
 
             cmd = 'nice {0} -i {1} -o {2} --preset "{3}" -t {4} {5}>> {6} 2>&1'.format(
-                cfg['HANDBRAKE_CLI'],
+                job.config.HANDBRAKE_CLI,
                 shlex.quote(srcpath),
                 shlex.quote(filepathname),
                 hb_preset,
-                str(title),
+                str(track.track_number),
                 hb_args,
                 logfile
                 )
@@ -177,29 +142,22 @@ def handbrake_all(srcpath, basepath, logfile, job):
                     shell=True
                 ).decode("utf-8")
                 logging.debug("Handbrake exit code: " + hb)
+                track.status = "success"
             except subprocess.CalledProcessError as hb_error:
-                err = "Handbrake encoding of title " + str(title) + " failed with code: " + str(hb_error.returncode) + "(" + str(hb_error.output) + ")"
+                err = "Handbrake encoding of title " + str(track.track_number) + " failed with code: " + str(hb_error.returncode) + "(" + str(hb_error.output) + ")"  # noqa E501
                 logging.error(err)
-                job.errors.append(str(title))
+                track.status = "fail"
+                track.error = err
                 # return
                 # sys.exit(err)
 
-            # move file
-            if job.video_type == "movie":
-                logging.debug("mt_track: " + mt_track + " List track: " + str(title))
-                if mt_track == str(title):
-                    utils.move_files(basepath, filename, job, True)
-                else:
-                    utils.move_files(basepath, filename, job, False)
+            track.ripped = True
+            db.session.commit()
 
     logging.info("Handbrake processing complete")
     logging.debug(str(job))
-    if job.video_type == "movie" and job.hasnicetitle:
-        utils.scan_emby()
-        try:
-            os.rmdir(basepath)
-        except OSError:
-            pass
+
+    return
 
 
 def handbrake_mkv(srcpath, basepath, logfile, job):
@@ -213,22 +171,22 @@ def handbrake_mkv(srcpath, basepath, logfile, job):
     """
 
     if job.disctype == "dvd":
-        hb_args = cfg['HB_ARGS_DVD']
-        hb_preset = cfg['HB_PRESET_DVD']
+        hb_args = job.config.HB_ARGS_DVD
+        hb_preset = job.config.HB_PRESET_DVD
     elif job.disctype == "bluray":
-        hb_args = cfg['HB_ARGS_BD']
-        hb_preset = cfg['HB_PRESET_BD']
+        hb_args = job.config.HB_ARGS_BD
+        hb_preset = job.config.HB_PRESET_BD
 
     for f in os.listdir(srcpath):
         srcpathname = os.path.join(srcpath, f)
         destfile = os.path.splitext(f)[0]
-        filename = os.path.join(basepath, destfile + "." + cfg['DEST_EXT'])
+        filename = os.path.join(basepath, destfile + "." + job.config.DEST_EXT)
         filepathname = os.path.join(basepath, filename)
 
         logging.info("Transcoding file " + shlex.quote(f) + " to " + shlex.quote(filepathname))
 
         cmd = 'nice {0} -i {1} -o {2} --preset "{3}" {4}>> {5} 2>&1'.format(
-            cfg['HANDBRAKE_CLI'],
+            job.config.HANDBRAKE_CLI,
             shlex.quote(srcpathname),
             shlex.quote(filepathname),
             hb_preset,
@@ -247,25 +205,26 @@ def handbrake_mkv(srcpath, basepath, logfile, job):
         except subprocess.CalledProcessError as hb_error:
             err = "Handbrake encoding of file " + shlex.quote(f) + " failed with code: " + str(hb_error.returncode) + "(" + str(hb_error.output) + ")"
             logging.error(err)
-            job.errors.append(f)
+            # job.errors.append(f)
 
     logging.info("Handbrake processing complete")
     logging.debug(str(job))
 
+    return
 
-def get_title_length(title, srcpath):
-    """Use HandBrake to get the title length\n
-    title = title to scan\n
-    srcpath = location of the dvd or decrypted bluray\n
 
-    returns the length of the title or -1 if the length could not be determinied
+def get_track_info(srcpath, job):
+    """Use HandBrake to get track info and updatte Track class\n
+
+    srcpath = Path to disc\n
+    job = Job instance\n
     """
-    logging.debug("Getting length from " + srcpath + " on title: " + str(title))
+    
+    logging.info("Using HandBrake to get information on all the tracks on the disc.  This will take a few minutes...")
 
-    cmd = '{0} -i {1} -t {2} --scan'.format(
-        cfg['HANDBRAKE_CLI'],
-        shlex.quote(srcpath),
-        title
+    cmd = '{0} -i {1} -t 0 --scan'.format(
+        job.config.HANDBRAKE_CLI,
+        shlex.quote(srcpath)
         )
 
     logging.debug("Sending command: %s", (cmd))
@@ -275,17 +234,60 @@ def get_title_length(title, srcpath):
             cmd,
             stderr=subprocess.STDOUT,
             shell=True
-        ).decode("utf-8").splitlines()
+        ).decode('cp437').splitlines()
     except subprocess.CalledProcessError as hb_error:
-        # err = "Call to handbrake failed with code: " + str(hb_error.returncode) + "(" + str(hb_error.output) + ")"
-        logging.debug("Couldn't find a valid track.  Try running the command manually to see more specific errors.")
+        logging.error("Couldn't find a valid track.  Try running the command manually to see more specific errors.")
+        logging.error("Specifid error is: " + str(hb_error.returncode) + "(" + str(hb_error.output) + ")")
         return(-1)
         # sys.exit(err)
 
+    t_pattern = re.compile(r'.*\+ title *')
     pattern = re.compile(r'.*duration\:.*')
+    seconds = 0
+    t_no = 0
+    fps = float(0)
+    aspect = 0
+    result = None
+    mainfeature = False
     for line in hb:
+
+        # get number of titles
+        if result is None:
+            if job.disctype == "bluray":
+                result = re.search('scan: BD has (.*) title\(s\)', line)
+            else:
+                result = re.search('scan: DVD has (.*) title\(s\)', line)
+
+            if result:
+                titles = result.group(1)
+                titles = titles.strip()
+                logging.debug("Line found is: " + line)
+                logging.info("Found " + titles + " titles")
+                job.no_of_titles = titles
+                db.session.commit()
+
+        if(re.search(t_pattern, line)) is not None:
+            if t_no == 0:
+                pass
+            else:
+                utils.put_track(job, t_no, seconds, aspect, fps, mainfeature, "handbrake")
+
+            mainfeature = False
+            t_no = line.rsplit(' ', 1)[-1]
+            t_no = t_no.replace(":", "")
+
         if(re.search(pattern, line)) is not None:
             t = line.split()
             h, m, s = t[2].split(':')
             seconds = int(h) * 3600 + int(m) * 60 + int(s)
-            return(seconds)
+
+        if(re.search("Main Feature", line)) is not None:
+            mainfeature = True
+
+        if(re.search(" fps", line)) is not None:
+            fps = line.rsplit(' ', 2)[-2]
+            aspect = line.rsplit(' ', 3)[-3]
+            aspect = str(aspect).replace(",", "")
+
+    utils.put_track(job, t_no, seconds, aspect, fps, mainfeature, "handbrake")
+

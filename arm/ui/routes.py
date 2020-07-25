@@ -3,10 +3,10 @@ from time import sleep
 from flask import render_template, abort, request, send_file, flash, redirect, url_for
 import psutil
 from arm.ui import app, db
-from arm.models.models import Job
+from arm.models.models import Job, Config
 from arm.config.config import cfg
 from arm.ui.utils import convert_log, get_info, call_omdb_api
-from arm.ui.forms import TitleSearchForm
+from arm.ui.forms import TitleSearchForm, ChangeParamsForm
 
 
 @app.route('/logreader')
@@ -50,6 +50,22 @@ def rips():
     return render_template('activerips.html', jobs=Job.query.filter_by(status="active"))
 
 
+@app.route('/history')
+def history():
+    jobs = Job.query.filter_by()
+
+    return render_template('history.html', jobs=jobs)
+
+
+@app.route('/jobdetail', methods=['GET', 'POST'])
+def jobdetail():
+    job_id = request.args.get('job_id')
+    jobs = Job.query.get(job_id)
+    tracks = jobs.tracks.all()
+
+    return render_template('jobdetail.html', jobs=jobs, tracks=tracks)
+
+
 @app.route('/titlesearch', methods=['GET', 'POST'])
 def submitrip():
     job_id = request.args.get('job_id')
@@ -65,19 +81,28 @@ def submitrip():
     return render_template('titlesearch.html', title='Update Title', form=form)
 
 
+@app.route('/changeparams', methods=['GET', 'POST'])
+def changeparams():
+    config_id = request.args.get('config_id')
+    config = Config.query.get(config_id)
+    form = ChangeParamsForm(obj=config)
+    if form.validate_on_submit():
+        form.populate_obj(config)
+        db.session.commit()
+        flash('Parameters changed. Rip Method={}, Main Feature={}, Minimum Length={}, Maximum Length={}'.format(form.RIPMETHOD.data, form.MAINFEATURE.data,
+              form.MINLENGTH.data, form.MAXLENGTH.data), category='success')
+        # return redirect(url_for('list_titles', title=form.title.data, year=form.year.data, job_id=job_id))
+        return redirect(url_for('home'))
+    return render_template('changeparams.html', title='Change Parameters', form=form)
+
+
 @app.route('/list_titles')
 def list_titles():
-    title = request.args.get('title')
-    year = request.args.get('year')
+    title = request.args.get('title').strip()
+    year = request.args.get('year').strip()
     job_id = request.args.get('job_id')
     dvd_info = call_omdb_api(title, year)
     return render_template('list_titles.html', results=dvd_info, job_id=job_id)
-
-
-# @app.route('/list_titles/<title>/<year>/<job_id>')
-# def list_titles(title, year, job_id):
-#     dvd_info = call_omdb_api(title, year)
-#     return render_template('list_titles.html', results=dvd_info, job_id=job_id)
 
 
 @app.route('/gettitle', methods=['GET', 'POST'])
@@ -92,13 +117,26 @@ def gettitle():
 def updatetitle():
     new_title = request.args.get('title')
     new_year = request.args.get('year')
+    video_type = request.args.get('type')
+    imdbID = request.args.get('imdbID')
+    poster_url = request.args.get('poster')
     job_id = request.args.get('job_id')
+    print("New imdbID=" + imdbID)
     job = Job.query.get(job_id)
-    job.new_title = new_title
-    job.new_year = new_year
+    job.title = new_title
+    job.title_manual = new_title
+    job.year = new_year
+    job.year_manual = new_year
+    job.video_type_manual = video_type
+    job.video_type = video_type
+    job.imdb_id_manual = imdbID
+    job.imdb_id = imdbID
+    job.poster_url_manual = poster_url
+    job.poster_url = poster_url
+    job.hasnicetitle = True
     db.session.add(job)
     db.session.commit()
-    flash('Title: {} ({}) was updated to {} ({})'.format(job.title, job.year, new_title, new_year), category='success')
+    flash('Title: {} ({}) was updated to {} ({})'.format(job.title_auto, job.year_auto, new_title, new_year), category='success')
     return redirect(url_for('home'))
 
 
@@ -133,8 +171,10 @@ def home():
     freegb = round(freegb/1073741824, 1)
     mfreegb = psutil.disk_usage(cfg['MEDIA_DIR']).free
     mfreegb = round(mfreegb/1073741824, 1)
-    jobs = Job.query.filter_by(status="active")
-    # for job in jobs:
-    #     job.omdb_info = call_omdb_api(title=job.title, year=job.year)
+    if os.path.isfile(cfg['DBFILE']):
+        # jobs = Job.query.filter_by(status="active")
+        jobs = db.session.query(Job).filter(Job.status.notin_(['fail', 'success'])).all()
+    else:
+        jobs = {}
 
     return render_template('index.html', freegb=freegb, mfreegb=mfreegb, jobs=jobs)

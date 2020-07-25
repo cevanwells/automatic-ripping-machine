@@ -2,20 +2,31 @@
 
 [![Build Status](https://travis-ci.org/automatic-ripping-machine/automatic-ripping-machine.svg?branch=v2_master)](https://travis-ci.org/automatic-ripping-machine/automatic-ripping-machine)
 
-## Note if upgrading from v2_master to v2_fixes
+## Upgrading from v2_master to v2.1_dev
 
-The v2_fixes branch currently has a fix for #210 which changes ARM to launch a wrapper script and removed all usage of Systemd.  If you previously had
-v2_master installed and checkout this branch (or were on a previous version of v2_fixes), then you need to make a couple of manual changes to update Udev
-to point to the wrapper script.
+If you wish to upgrade from v2_master to v2.1_dev instead of a clean install, these directions should get you there.  
 
-After updating your local v2_fixes branch run the following command:
 ```bash
-sudo udevadm control --reload-rules
+cd /opt/arm
+sudo git checkout v2.1_dev
+sudo pip3 install -r requirements.txt
 ```
-You might also want to make sure your symlink to 51-automedia.rules is still in tact.
+Backup config file and replace it with the updated config
+```bash
+mv arm.yaml arm.yaml.old
+cp docs/arm.yaml.sample arm.yaml
+```
 
-Finally, although it's technically not necessary, you probably should remove all remnants of the systemd configuration.  See instructions here:
-https://superuser.com/questions/513159/how-to-remove-systemd-services
+There are new config parameters so review the new arm.yaml file
+
+Make sure the 'arm' user has write permissions to the db directory (see your arm.yaml file for locaton). is writeable by the arm user.  A db will be created when you first run ARM.
+
+There is not yet a proper web server set up, so you can serve up the web UI through the flask development web server.  You can start is by:
+```bash
+python3 /opt/arm/arm/runui.py
+```
+
+Please log any issues you find.  Don't forget to run in DEBUG mode if you need to submit an issue (and log files).  Also, please note that you are running 2.1_dev in your issue.
 
 
 ## Overview
@@ -41,6 +52,7 @@ See: https://b3n.org/automatic-ripping-machine
   - If data (Blu-Ray, DVD, or CD) - make an ISO backup
 - Headless, designed to be run from a server
 - Can rip from multiple-optical drives in parallel
+- HTML UI to interact with ripping jobs, view logs, etc
 
 
 ## Requirements
@@ -86,7 +98,7 @@ sudo apt install handbrake-cli libavcodec-extra
 sudo apt install abcde flac imagemagick glyrc cdparanoia
 sudo apt install at
 sudo apt install python3 python3-pip
-sudo apt-get install libcurl4-openssl-dev libssl-dev
+sudo apt-get install libcurl4-openssl-dev libssl-dev  
 sudo apt-get install libdvd-pkg
 sudo dpkg-reconfigure libdvd-pkg
 sudo apt install default-jre-headless
@@ -100,9 +112,10 @@ sudo mkdir arm
 sudo chown arm:arm arm
 sudo chmod 775 arm
 sudo git clone https://github.com/automatic-ripping-machine/automatic-ripping-machine.git arm
+sudo chown -R arm:arm arm
 cd arm
 # TODO: Remove below line before merging to master
-git checkout v2_master
+git checkout v2.1_dev
 sudo pip3 install -r requirements.txt 
 sudo ln -s /opt/arm/setup/51-automedia.rules /lib/udev/rules.d/
 sudo ln -s /opt/arm/setup/.abcde.conf /home/arm/
