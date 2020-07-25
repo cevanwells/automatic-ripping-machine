@@ -8,6 +8,7 @@ import subprocess
 import shutil
 import requests
 import time
+import socket
 
 # from arm.config.config import cfg
 from arm.ui import app, db # noqa E402
@@ -18,6 +19,8 @@ def notify(job, title, body):
     # Send notificaions
     # title = title for notification
     # body = body of the notification
+    
+    title = "{} ({})".format(title, socket.gethostname())
 
     if job.config.PB_KEY != "":
         try:
